@@ -1,0 +1,30 @@
+---
+title: "PCA"
+output: html_document
+date: "2025-10-29"
+---
+## Data Visualisation & Manipulation
+
+```{r}
+# import 
+restaurant_revenue <- read.csv("~/Documents/fac/M2/adv_machine_learning/project/data/restaurant_revenue.csv", stringsAsFactors=TRUE)
+```
+
+```{r}
+# transforming variable Promotions into factor 
+restaurant_revenue$Promotions[restaurant_revenue$Promotions == 0] <- 'No'
+restaurant_revenue$Promotions[restaurant_revenue$Promotions == 1] <- 'Yes'
+restaurant_revenue$Promotions <- as.factor(restaurant_revenue$Promotions)
+```
+
+```{r}
+# subset without qualitative variables
+restaurant_revenue_subset <- subset(restaurant_revenue, select = -c(Cuisine_Type, Promotions))
+
+# pca
+pca.out=prcomp(restaurant_revenue_subset, scale=TRUE)
+pca.out
+names(pca.out)
+biplot(pca.out, cex=0.6, scale=0)
+```
+

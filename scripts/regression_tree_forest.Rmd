@@ -72,3 +72,76 @@ geom_col(fill = "#6bafd6") +
 
 ```
 
+```{r}
+# predict using pruned tree
+monthly_revenue_pred <- predict(pruned_tree, newdata = test_data)
+
+# computing MSE, RMSE, COEFF OF DETERMINATION (R2)
+mse <- mean((test_data$Monthly_Revenue - monthly_revenue_pred)^2)
+rmse <- sqrt(mse)
+r2 <- 1 - sum((test_data$Monthly_Revenue - monthly_revenue_pred)^2) / 
+             sum((test_data$Monthly_Revenue - mean(test_data$Monthly_Revenue))^2)
+
+# print 
+cat("MSE of pruned tree:", mse, "\n")
+cat("RMSE of pruned tree:", rmse, "\n")
+cat("R2 of pruned tree:", r2, "\n")
+
+# plot 
+predVSactual_pruned <- 
+ggplot(data = data.frame(test_data$Monthly_Revenue, monthly_revenue_pred), 
+       aes(x = test_data$Monthly_Revenue, y = monthly_revenue_pred)) +
+  geom_point(color = "#6bafd6", size = 2) + 
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "A. Pruned Tree", x = "", y = "") +
+  #labs(title = "Predicted vs Actual Monthly Revenue",
+       #x = "Actual Monthly Revenue",
+       #y = "Predicted Monthly Revenue") +
+  theme_minimal()
+```
+
+```{r}
+# predict using max tree
+monthly_revenue_pred_max <- predict(max_tree, newdata = test_data)
+
+# computing MSE, RMSE, COEFF OF DETERMINATION (R2)
+mse <- mean((test_data$Monthly_Revenue - monthly_revenue_pred_max)^2)
+rmse <- sqrt(mse)
+r2 <- 1 - sum((test_data$Monthly_Revenue - monthly_revenue_pred_max)^2) / 
+             sum((test_data$Monthly_Revenue - mean(test_data$Monthly_Revenue))^2)
+
+# print 
+cat("MSE of pruned tree:", mse, "\n")
+cat("RMSE of pruned tree:", rmse, "\n")
+cat("R2 of pruned tree:", r2, "\n")
+
+# plot 
+predVSactual_max <-
+ggplot(data = data.frame(test_data$Monthly_Revenue, monthly_revenue_pred_max), 
+       aes(x = test_data$Monthly_Revenue, y = monthly_revenue_pred_max)) +
+  geom_point(color = "#6bafd6", size = 2) + 
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "B. Full Tree", x = "", y = "") +
+  #labs(title = "Predicted vs Actual Monthly Revenue",
+       #x = "Actual Monthly Revenue",
+       #y = "Predicted Monthly Revenue") +
+  theme_minimal()
+```
+
+```{r}
+library(ggpubr)
+
+# plot figure 
+predictedVSactual_fig <- 
+  ggarrange(predVSactual_pruned, predVSactual_max, ncol = 2)
+annotate_figure(predictedVSactual_fig, 
+                top = "Predicted vs Actual Monthly Revenue", 
+                left = "Predicted Monthely Revenue", 
+                bottom = "Actual Monthely Revenue", 
+                fig.lab.face = "bold")
+```
+
+# Regression forest 
+```{r}
+
+```
