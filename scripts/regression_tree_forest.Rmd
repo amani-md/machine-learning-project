@@ -1,0 +1,74 @@
+---
+title: "regression_tree_forest"
+output: html_document
+date: "2025-10-29"
+---
+
+## Data Visualisation & Manipulation
+
+```{r}
+# import 
+restaurant_revenue <- read.csv("~/Documents/fac/M2/adv_machine_learning/project/data/restaurant_revenue.csv", stringsAsFactors=TRUE)
+```
+
+```{r}
+head(restaurant_revenue)
+```
+```{r}
+str(restaurant_revenue)
+```
+```{r}
+table(is.na(restaurant_revenue))
+```
+
+```{r}
+# transforming variable Promotions into factor 
+restaurant_revenue$Promotions[restaurant_revenue$Promotions == 0] <- 'No'
+restaurant_revenue$Promotions[restaurant_revenue$Promotions == 1] <- 'Yes'
+restaurant_revenue$Promotions <- as.factor(restaurant_revenue$Promotions)
+```
+
+## Regression tree
+
+```{r}
+# libraries
+library(rpart) 
+library(rpart.plot) 
+library(caret)
+```
+
+```{r}
+set.seed(123)
+
+# split train / test subsets 
+train_index = createDataPartition(restaurant_revenue$Monthly_Revenue, p = 0.7, list = FALSE)
+train_data = restaurant_revenue[train_index, ]
+test_data = restaurant_revenue[-train_index, ]
+
+# fit max tree
+max_tree <- rpart(Monthly_Revenue ~. , data = train_data, cp = 0)
+rpart.plot(max_tree)
+
+# compute complexity 
+cpOpt = max_tree$cptable[which.min(max_tree$cptable[,4]),1]
+plotcp(max_tree) 
+abline(v = which.min(max_tree$cptable[,4]), col = "red", lty = 2)
+
+# fit pruned tree
+pruned_tree = rpart(Monthly_Revenue ~. , data = train_data, cp = cpOpt)
+rpart.plot(pruned_tree)
+```
+```{r}
+# create the variable importance dataframe
+x = sort(pruned_tree$variable.importance)
+df_importance = data.frame(Variable = factor(names(x), levels = names(x)), 	Importance = as.numeric(x))
+
+# plot
+ggplot(df_importance, aes(x = Importance, y = Variable)) +
+geom_col(fill = "#6bafd6") +
+  labs(title = "Variables Importance", x = "Variable importance", size = 0.1) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 10)) 
+
+```
+
