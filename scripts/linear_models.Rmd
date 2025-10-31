@@ -8,18 +8,32 @@ date: "2025-10-31"
 
 ```{r}
 # import 
-restaurant_revenue <- read.csv("~/Documents/fac/M2/adv_machine_learning/project/data/restaurant_revenue.csv", stringsAsFactors=TRUE)
+restaurant_revenue <- read.csv("~/Documents/fac/M2/adv_machine_learning/project/data/restaurant_revenue.csv")
 ```
 
 ```{r}
-# keeping only the numerical variables 
-restaurant_revenue <- subset(restaurant_revenue, 
-                             select = c("Number_of_Customers", "Menu_Price", "Marketing_Spend",
-                                        "Average_Customer_Spending", "Reviews", "Monthly_Revenue"))
+# transforming categorical variables into numerical variables
+## American = 0, Italian = 1, Japanese = 2, Mexican = 3
+
+restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "American"] <- 0
+restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "Italian"] <- 1
+restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "Japanese"] <- 2
+restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "Mexican"] <- 3
+
+```
+
+```{r}
+set.seed(123)
+# split train / test subsets 
+train_index = createDataPartition(restaurant_revenue$Monthly_Revenue, p = 0.7, list = FALSE)
+train_data = restaurant_revenue[train_index, ]
+test_data = restaurant_revenue[-train_index, ]
 ```
 
 ## Linear regression
+
 The aim is to build and compare linear regression models for predicting **restaurant monthly revenue** using stepwise selection methods based on the Bayesian Information Criterion (BIC)
+
 ```{r}
 # libraries 
 library(glmnet)
@@ -27,21 +41,19 @@ library(dplyr)
 library(tidyr)
 ```
 
-
 ```{r}
 # fit linear model
-set.seed(123)
-full_model <- lm(Monthly_Revenue ~ . , data = restaurant_revenue)
+full_model <- lm(Monthly_Revenue ~ . , data = train_data)
 ```
 
 ```{r}
 # forward stepwise selection with BIC
-empty_model <- lm(Monthly_Revenue ~ 1, data = restaurant_revenue)
+empty_model <- lm(Monthly_Revenue ~ 1, data = train_data)
 
 forward_model <- step(empty_model,
                       scope = list(lower = empty_model, upper = full_model),
                       direction = "forward",
-                      k = log(nrow(restaurant_revenue)),
+                      k = log(nrow(train_data)),
                       trace = FALSE)
 ```
 
@@ -49,7 +61,7 @@ forward_model <- step(empty_model,
 # backward stepwise selection with BIC
 backward_model <- step(full_model,
                        direction = "backward",
-                       k = log(nrow(restaurant_revenue)),
+                       k = log(nrow(train_data)),
                        trace = FALSE)
 ```
 
@@ -76,6 +88,8 @@ regression_table <-
 regression_table
 ```
 
+**Observations:** essentially, adjusted $R^2$ is pretty much the same accross the three models. Plus, both forward/backward end up with the same linear model which is *Monthly_Revenue \~ Number_of_Customers + Menu_Price + Marketing_Spend*.
+
 ## Ridge regression
 The goal is to examine how Ridge and Lasso regression techniques apply regularization and how the model coefficients behave across varying levels of penalty strength.
 
@@ -85,54 +99,121 @@ set.seed(123)
 ## matrix 
 X <- as.matrix(restaurant_revenue[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", "Average_Customer_Spending", "Reviews")])
 y <- restaurant_revenue$Monthly_Revenue
-
-## lambdas to test
-lambdas <- 10^seq(-2, 5, length.out = 100)
 ```
 
 ```{r}
 # ridge regression
-ridge_fit <- glmnet(X, y, alpha = 0, lambda = lambdas, standardize = TRUE)
+ridge_fit = glmnet(X, y, alpha=0, standardize = TRUE)
 ```
 
 ```{r}
-# coefficient extracted for each lambda considered using beta attribute
+# coeff evolution depending on the value of the tuning parameter lambda 
+
+## coefficients extraction
 coef_matrix <- as.matrix(ridge_fit$beta)
 ridge_df <- as.data.frame(t(coef_matrix))
 ridge_df$log_lambda <- log10(ridge_fit$lambda)
 ridge_df <- pivot_longer(ridge_df, -log_lambda, names_to = "Predictor", values_to = "Coefficient")
+
+## plot
+ggplot(ridge_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
+  geom_line(linewidth = 1) +
+  labs(title = "Ridge Coefficient Paths", x = "log10(λ)", y = "Coefficient") +
+  theme_bw() 
 ```
 
 ```{r}
+# CV to choose the best lambda
+cv_ridge = cv.glmnet(X, y, alpha = 0, standardize = TRUE)
+cat("λ with the smallest MSE:", cv_ridge$lambda.min, "\n")
+cv_ridge$lambda.min
+
 # plot 
-ggplot(ridge_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
-  geom_line(size = 1) +
-  labs(title = "Ridge Coefficient Paths", x = "log10(alpha)", y = "Coefficient") +
-  theme_minimal() 
+plot(cv_ridge)
 ```
+
+```{r}
+# MSE over lambda - ADD LEGEND & SECOND X AXIS 
+n_nonzero <- apply(coef(cv.ridge$glmnet.fit)[-1, ], 2, function(x) sum(x != 0))
+
+cv_df <- data.frame(
+  lambda = cv.ridge$lambda,
+  mean = cv.ridge$cvm,
+  se = cv.ridge$cvsd,
+  log_lambda = log(cv.ridge$lambda),
+  n_nonzero = n_nonzero)
+
+ggplot(cv_df, aes(x = log_lambda, y = mean)) +
+  geom_point(size = 2, color = "#6bafd6") +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.05, color = "grey50") +
+  geom_vline(xintercept = log(cv.ridge$lambda.min), linetype = "dashed", color = "red") +
+  geom_vline(xintercept = log(cv.ridge$lambda.1se), linetype = "dashed", color = "blue") +
+  labs(
+    title = "Cross-Validation Curve (Ridge Regression)",
+    x = "Log(λ)",
+    y = "Mean Squared Error") +
+  theme_bw()
+```
+
+
 ## Lasso regression
 ```{r}
 # fit lasso regression model 
-lasso_fit <- glmnet(X, y, alpha = 1, lambda = lambdas, standardize = TRUE)
+lasso_fit <- glmnet(X, y, alpha = 1, standardize = TRUE)
 ```
 
 ```{r}
-
 # coefficients extraction
 coef_matrix <- as.matrix(lasso_fit$beta)
 lasso_df <- as.data.frame(t(coef_matrix))
 lasso_df$log_lambda <- log10(lasso_fit$lambda)
 lasso_df <- pivot_longer(lasso_df, -log_lambda, names_to = "Predictor", values_to = "Coefficient")
+
+# plot
+ggplot(lasso_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
+  geom_line(linewidth = 1) +
+  labs(title = "Lasso Coefficient Paths", x = "log10(λ)", y = "Coefficient") +
+  theme_bw()
 ```
 
 ```{r}
-# plot
-ggplot(lasso_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
-  geom_line(size = 1) +
-  labs(title = "Lasso Coefficient Paths", x = "log10(alpha)", y = "Coefficient") +
+# CV to choose the best lambda
+cv_lasso = cv.glmnet(X, y, alpha = 1, standardize = TRUE)
+cat("λ with the smallest MSE:", cv_lasso$lambda.min, "\n")
+
+# plot 
+plot(cv_lasso)
+```
+
+```{r}
+# MSE over lambda - ADD LEGEND & SECOND X AXIS 
+n_nonzero <- apply(coef(cv_lasso$glmnet.fit)[-1, ], 2, function(x) sum(x != 0))
+
+cv_df <- data_frame(
+  lambda = cv_lasso$lambda,
+  mean = cv_lasso$cvm,
+  se = cv_lasso$cvsd,
+  log_lambda = log(cv_lasso$lambda),
+  n_nonzero = n_nonzero)
+
+ggplot(cv_df, aes(x = log_lambda, y = mean)) +
+  geom_point(size = 2, color = "#6bafd6") +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.05, color = "grey50") +
+  geom_vline(xintercept = log(cv_lasso$lambda.min), linetype = "dashed", color = "red") +
+  geom_vline(xintercept = log(cv_lasso$lambda.1se), linetype = "dashed", color = "blue") +
+  labs(
+    title = "Cross-Validation Curve (Ridge Regression)",
+    x = "Log(λ)",
+    y = "Mean Squared Error") +
   theme_bw()
 ```
+**LEFT TO DO**
+- refit the lasso/ridge to predict 
+- get the MSE, RMSE, ADJUSTED R2
+
 ## Principal Components Regression & Partial Least Squares Regression
+Repenser cette section
+
 ```{r}
 library(pls)
 pcr_model <- pcr(y ~ X, validation = "CV", ncomp = 5, scale = TRUE, segments = 10)
@@ -161,6 +242,7 @@ ggplot(results_df, aes(x = Components, y = MSE, color = Method)) +
   labs(title = "CV MSE VS Number of Components", x = "Number of Components", y = "10-fold CV MSE") +
   theme_bw()
 ```
+
 ```{r}
 opt_pcr <- which.min(mse_pcr)
 opt_pls <- which.min(mse_pls)
@@ -172,4 +254,3 @@ summary_df <- data.frame(
 )
 summary_df
 ```
-
