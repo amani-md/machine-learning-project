@@ -143,5 +143,5 @@ annotate_figure(predictedVSactual_fig,
 
 # Regression forest 
 ```{r}
+library(randomForest)
 
-```

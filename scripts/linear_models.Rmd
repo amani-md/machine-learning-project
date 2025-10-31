@@ -1,0 +1,175 @@
+---
+title: "linear_models"
+output: html_document
+date: "2025-10-31"
+---
+
+## Data Visualisation & Manipulation
+
+```{r}
+# import 
+restaurant_revenue <- read.csv("~/Documents/fac/M2/adv_machine_learning/project/data/restaurant_revenue.csv", stringsAsFactors=TRUE)
+```
+
+```{r}
+# keeping only the numerical variables 
+restaurant_revenue <- subset(restaurant_revenue, 
+                             select = c("Number_of_Customers", "Menu_Price", "Marketing_Spend",
+                                        "Average_Customer_Spending", "Reviews", "Monthly_Revenue"))
+```
+
+## Linear regression
+The aim is to build and compare linear regression models for predicting **restaurant monthly revenue** using stepwise selection methods based on the Bayesian Information Criterion (BIC)
+```{r}
+# libraries 
+library(glmnet)
+library(dplyr)
+library(tidyr)
+```
+
+
+```{r}
+# fit linear model
+set.seed(123)
+full_model <- lm(Monthly_Revenue ~ . , data = restaurant_revenue)
+```
+
+```{r}
+# forward stepwise selection with BIC
+empty_model <- lm(Monthly_Revenue ~ 1, data = restaurant_revenue)
+
+forward_model <- step(empty_model,
+                      scope = list(lower = empty_model, upper = full_model),
+                      direction = "forward",
+                      k = log(nrow(restaurant_revenue)),
+                      trace = FALSE)
+```
+
+```{r}
+# backward stepwise selection with BIC
+backward_model <- step(full_model,
+                       direction = "backward",
+                       k = log(nrow(restaurant_revenue)),
+                       trace = FALSE)
+```
+
+```{r}
+# comparison
+
+## selected variables for each model 
+selected_full <- names(coef(full_model))[-1]
+selected_forward <- names(coef(forward_model))[-1]
+selected_backward <- names(coef(backward_model))[-1]
+
+# adjusted R2 for each model
+adj_r2_full <- summary(full_model)$adj.r.squared
+adj_r2_forward <- summary(forward_model)$adj.r.squared
+adj_r2_backward <- summary(backward_model)$adj.r.squared
+
+regression_table <- 
+  data.frame(
+    Model = c("Forward Selection", "Backward Selection", "Linear Model"),
+    Predictors = sapply(list(selected_forward, selected_backward, selected_full), paste, collapse = ", "),
+    Adjusted_R2 = c(adj_r2_forward, adj_r2_backward, adj_r2_full)
+  )
+
+regression_table
+```
+
+## Ridge regression
+The goal is to examine how Ridge and Lasso regression techniques apply regularization and how the model coefficients behave across varying levels of penalty strength.
+
+```{r}
+# prep 
+set.seed(123)
+## matrix 
+X <- as.matrix(restaurant_revenue[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", "Average_Customer_Spending", "Reviews")])
+y <- restaurant_revenue$Monthly_Revenue
+
+## lambdas to test
+lambdas <- 10^seq(-2, 5, length.out = 100)
+```
+
+```{r}
+# ridge regression
+ridge_fit <- glmnet(X, y, alpha = 0, lambda = lambdas, standardize = TRUE)
+```
+
+```{r}
+# coefficient extracted for each lambda considered using beta attribute
+coef_matrix <- as.matrix(ridge_fit$beta)
+ridge_df <- as.data.frame(t(coef_matrix))
+ridge_df$log_lambda <- log10(ridge_fit$lambda)
+ridge_df <- pivot_longer(ridge_df, -log_lambda, names_to = "Predictor", values_to = "Coefficient")
+```
+
+```{r}
+# plot 
+ggplot(ridge_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
+  geom_line(size = 1) +
+  labs(title = "Ridge Coefficient Paths", x = "log10(alpha)", y = "Coefficient") +
+  theme_minimal() 
+```
+## Lasso regression
+```{r}
+# fit lasso regression model 
+lasso_fit <- glmnet(X, y, alpha = 1, lambda = lambdas, standardize = TRUE)
+```
+
+```{r}
+
+# coefficients extraction
+coef_matrix <- as.matrix(lasso_fit$beta)
+lasso_df <- as.data.frame(t(coef_matrix))
+lasso_df$log_lambda <- log10(lasso_fit$lambda)
+lasso_df <- pivot_longer(lasso_df, -log_lambda, names_to = "Predictor", values_to = "Coefficient")
+```
+
+```{r}
+# plot
+ggplot(lasso_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
+  geom_line(size = 1) +
+  labs(title = "Lasso Coefficient Paths", x = "log10(alpha)", y = "Coefficient") +
+  theme_bw()
+```
+## Principal Components Regression & Partial Least Squares Regression
+```{r}
+library(pls)
+pcr_model <- pcr(y ~ X, validation = "CV", ncomp = 5, scale = TRUE, segments = 10)
+mse_pcr <- MSEP(pcr_model)$val[1, 1, -1]
+```
+
+```{r}
+# plsr() function is analogous to the pcr() function. It returns object of class "plsr". 
+pls_model <- plsr(y ~ X, validation = "CV", ncomp = 5, scale = TRUE, segments = 10)
+
+# Extract cross-validated MSEs from the PLS model for components 1 to 6 
+mse_pls <- MSEP(pls_model)$val[1, 1, -1]
+```
+
+```{r}
+results_df <- tibble(
+  Components = 1:5,
+  PCR = mse_pcr,
+  PLS = mse_pls
+) %>%
+  pivot_longer(-Components, names_to = "Method", values_to = "MSE")
+
+ggplot(results_df, aes(x = Components, y = MSE, color = Method)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "CV MSE VS Number of Components", x = "Number of Components", y = "10-fold CV MSE") +
+  theme_bw()
+```
+```{r}
+opt_pcr <- which.min(mse_pcr)
+opt_pls <- which.min(mse_pls)
+
+summary_df <- data.frame(
+  Method = c("PCR", "PLS"),
+  Optimal_Components = c(opt_pcr, opt_pls),
+  Test_MSE = c(mse_pcr[opt_pcr], mse_pls[opt_pls])
+)
+summary_df
+```
+
