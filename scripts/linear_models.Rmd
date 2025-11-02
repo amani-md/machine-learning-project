@@ -4,12 +4,32 @@ output: html_document
 date: "2025-10-31"
 ---
 
-## Data Visualisation & Manipulation
 
-```{r}
-# import 
-restaurant_revenue <- read.csv("~/Documents/fac/M2/adv_machine_learning/project/data/restaurant_revenue.csv")
+```{r include=FALSE}
+## libraries
+packages <- c("here", "caret", "glmnet", "dplyr", "tidyr", "ggplot2")
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) {
+  install.packages(packages[!installed])
+}
+
+lapply(packages, library, character.only = TRUE)
 ```
+
+```{r include=FALSE}
+# import 
+data_path <- here("data", "restaurant_revenue.csv")
+
+if (!file.exists(data_path)) {
+  stop("File not found : ", data_path)
+}
+
+restaurant_revenue <- read.csv(data_path)
+```
+
+
+## Data Visualisation & Manipulation
 
 ```{r}
 # transforming categorical variables into numerical variables
@@ -33,13 +53,6 @@ test_data = restaurant_revenue[-train_index, ]
 ## Linear regression
 
 The aim is to build and compare linear regression models for predicting **restaurant monthly revenue** using stepwise selection methods based on the Bayesian Information Criterion (BIC)
-
-```{r}
-# libraries 
-library(glmnet)
-library(dplyr)
-library(tidyr)
-```
 
 ```{r}
 # fit linear model
@@ -91,14 +104,15 @@ regression_table
 **Observations:** essentially, adjusted $R^2$ is pretty much the same accross the three models. Plus, both forward/backward end up with the same linear model which is *Monthly_Revenue \~ Number_of_Customers + Menu_Price + Marketing_Spend*.
 
 ## Ridge regression
+
 The goal is to examine how Ridge and Lasso regression techniques apply regularization and how the model coefficients behave across varying levels of penalty strength.
 
 ```{r}
 # prep 
 set.seed(123)
 ## matrix 
-X <- as.matrix(restaurant_revenue[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", "Average_Customer_Spending", "Reviews")])
-y <- restaurant_revenue$Monthly_Revenue
+X <- as.matrix(train_data[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", "Average_Customer_Spending", "Reviews")])
+y <- train_data$Monthly_Revenue
 ```
 
 ```{r}
@@ -126,37 +140,56 @@ ggplot(ridge_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
 # CV to choose the best lambda
 cv_ridge = cv.glmnet(X, y, alpha = 0, standardize = TRUE)
 cat("λ with the smallest MSE:", cv_ridge$lambda.min, "\n")
-cv_ridge$lambda.min
-
-# plot 
-plot(cv_ridge)
 ```
 
 ```{r}
-# MSE over lambda - ADD LEGEND & SECOND X AXIS 
-n_nonzero <- apply(coef(cv.ridge$glmnet.fit)[-1, ], 2, function(x) sum(x != 0))
+# plot MSE over lambda
+plot(cv_ridge) 
 
-cv_df <- data.frame(
-  lambda = cv.ridge$lambda,
-  mean = cv.ridge$cvm,
-  se = cv.ridge$cvsd,
-  log_lambda = log(cv.ridge$lambda),
-  n_nonzero = n_nonzero)
+log_lambda_vals <- log(cv_ridge$lambda)
+mean_error_vals <- cv_ridge$cvm
+points(log_lambda_vals, mean_error_vals, pch = 19, col = "#6bafd6", cex = 0.8)
 
-ggplot(cv_df, aes(x = log_lambda, y = mean)) +
-  geom_point(size = 2, color = "#6bafd6") +
-  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.05, color = "grey50") +
-  geom_vline(xintercept = log(cv.ridge$lambda.min), linetype = "dashed", color = "red") +
-  geom_vline(xintercept = log(cv.ridge$lambda.1se), linetype = "dashed", color = "blue") +
-  labs(
-    title = "Cross-Validation Curve (Ridge Regression)",
-    x = "Log(λ)",
-    y = "Mean Squared Error") +
-  theme_bw()
+abline(v = log(cv_ridge$lambda.min), lty = 2, col = "red")
+abline(v = log(cv_ridge$lambda.1se), lty = 2, col = "blue")
+
+legend(
+  "bottomright",
+  legend = c(
+    expression(lambda["min"] * ": Minimum MSE"), 
+    expression(lambda["1se"] * ": 1-Standard Error Rule")
+  ),
+  col = c("red", "blue"),
+  lty = c(2, 2),
+  lwd = 1,
+  cex = 0.8,
+  bty = "n"
+  )
 ```
 
+```{r}
+# test matrices 
+X1 <- as.matrix(test_data[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", 
+                              "Average_Customer_Spending", "Reviews")])
+y1 <- test_data$Monthly_Revenue
+```
+
+```{r}
+# predict 
+y_predicted <- predict(cv_ridge, s = "lambda.min", newx = X1)
+
+# computing R2
+r2 <- 1 - (sum((y1 - y_predicted)^2)) / (sum((y1 - mean(y1))^2))
+mse <- mean((y1 - y_predicted)^2)
+rmse <- sqrt(mse)
+
+cat("R2 of ridge regression model:", r2, "\n")
+cat("MSE of ridge regression model:", mse, "\n")
+cat("RMSE of ridge regression model:", rmse, "\n")
+```
 
 ## Lasso regression
+
 ```{r}
 # fit lasso regression model 
 lasso_fit <- glmnet(X, y, alpha = 1, standardize = TRUE)
@@ -178,11 +211,33 @@ ggplot(lasso_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
 
 ```{r}
 # CV to choose the best lambda
-cv_lasso = cv.glmnet(X, y, alpha = 1, standardize = TRUE)
+cv_lasso = cv.glmnet(X, y, alpha = 1, standardize = TRUE) #best model as output
 cat("λ with the smallest MSE:", cv_lasso$lambda.min, "\n")
+```
 
-# plot 
-plot(cv_lasso)
+```{r}
+# plot MSE over lambda
+plot(cv_lasso) 
+
+log_lambda_vals <- log(cv_lasso$lambda)
+mean_error_vals <- cv_lasso$cvm
+points(log_lambda_vals, mean_error_vals, pch = 19, col = "#6bafd6", cex = 0.8)
+
+abline(v = log(cv_lasso$lambda.min), lty = 2, col = "red")
+abline(v = log(cv_lasso$lambda.1se), lty = 2, col = "blue")
+
+legend(
+  "topleft",
+  legend = c(
+    expression(lambda["min"] * ": Minimum MSE"), 
+    expression(lambda["1se"] * ": 1-Standard Error Rule")
+  ),
+  col = c("red", "blue"),
+  lty = c(2, 2),
+  lwd = 1,
+  cex = 0.8,
+  bty = "n"
+  )
 ```
 
 ```{r}
@@ -202,16 +257,28 @@ ggplot(cv_df, aes(x = log_lambda, y = mean)) +
   geom_vline(xintercept = log(cv_lasso$lambda.min), linetype = "dashed", color = "red") +
   geom_vline(xintercept = log(cv_lasso$lambda.1se), linetype = "dashed", color = "blue") +
   labs(
-    title = "Cross-Validation Curve (Ridge Regression)",
+    title = "Cross-Validation Curve",
     x = "Log(λ)",
-    y = "Mean Squared Error") +
+    y = "Mean Squared Error") + 
   theme_bw()
 ```
-**LEFT TO DO**
-- refit the lasso/ridge to predict 
-- get the MSE, RMSE, ADJUSTED R2
+
+```{r}
+# predict 
+y_predicted <- predict(cv_lasso, s = "lambda.min", newx = X1)
+
+# computing R2
+r2 <- 1 - (sum((y1 - y_predicted)^2)) / (sum((y1 - mean(y1))^2))
+mse <- mean((y1 - y_predicted)^2)
+rmse <- sqrt(mse)
+
+cat("R2 of lasso regression model:", r2, "\n")
+cat("MSE of lasso regression model:", mse, "\n")
+cat("RMSE of lasso regression model:", rmse, "\n")
+```
 
 ## Principal Components Regression & Partial Least Squares Regression
+
 Repenser cette section
 
 ```{r}
