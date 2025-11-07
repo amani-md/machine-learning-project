@@ -7,7 +7,7 @@ date: "2025-10-31"
 
 ```{r include=FALSE}
 ## libraries
-packages <- c("here", "caret", "glmnet", "dplyr", "tidyr", "ggplot2")
+packages <- c("here", "caret", "glmnet", "dplyr", "tidyr", "ggplot2", "ggpubr")
 
 installed <- packages %in% rownames(installed.packages())
 if (any(!installed)) {
@@ -31,15 +31,32 @@ restaurant_revenue <- read.csv(data_path)
 
 ## Data Visualisation & Manipulation
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 # transforming categorical variables into numerical variables
-## American = 0, Italian = 1, Japanese = 2, Mexican = 3
+restaurant_revenue$Cuisine_Type <- as.factor(restaurant_revenue$Cuisine_Type)
+dummy_matrix <- model.matrix(~ Cuisine_Type - 1, data = restaurant_revenue)
+colnames(dummy_matrix) <- gsub("Cuisine_Type", "Is_", colnames(dummy_matrix))
+restaurant_revenue_encoded <- restaurant_revenue[, -which(names(restaurant_revenue) == "Cuisine_Type")]
+restaurant_revenue <- cbind(restaurant_revenue_encoded, as.data.frame(dummy_matrix))
+```
 
-restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "American"] <- 0
-restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "Italian"] <- 1
-restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "Japanese"] <- 2
-restaurant_revenue$Cuisine_Type[restaurant_revenue$Cuisine_Type == "Mexican"] <- 3
+```{r include=FALSE}
+# option 2
+# Transformer en facteur
+restaurant_revenue$Cuisine_Type <- as.factor(restaurant_revenue$Cuisine_Type)
 
+# Créer les dummies avec une catégorie de référence (pas de -1)
+dummy_matrix <- model.matrix(~ Cuisine_Type, data = restaurant_revenue)
+
+# Supprimer la première colonne (catégorie de référence automatique)
+dummy_matrix <- dummy_matrix[, -1]
+
+# Renommer les colonnes pour plus de clarté
+colnames(dummy_matrix) <- gsub("Cuisine_Type", "Is_", colnames(dummy_matrix))
+
+# Retirer la colonne originale et ajouter les dummies
+restaurant_revenue_encoded <- restaurant_revenue[, -which(names(restaurant_revenue) == "Cuisine_Type")]
+restaurant_revenue <- cbind(restaurant_revenue_encoded, as.data.frame(dummy_matrix))
 ```
 
 ```{r}
@@ -50,10 +67,9 @@ train_data = restaurant_revenue[train_index, ]
 test_data = restaurant_revenue[-train_index, ]
 ```
 
-## Linear regression
-
-The aim is to build and compare linear regression models for predicting **restaurant monthly revenue** using stepwise selection methods based on the Bayesian Information Criterion (BIC)
-
+## Subset selection
+*step-wise selection (forward & backward)*  
+### Model selection  
 ```{r}
 # fit linear model
 full_model <- lm(Monthly_Revenue ~ . , data = train_data)
@@ -79,40 +95,72 @@ backward_model <- step(full_model,
 ```
 
 ```{r}
-# comparison
-
-## selected variables for each model 
-selected_full <- names(coef(full_model))[-1]
-selected_forward <- names(coef(forward_model))[-1]
-selected_backward <- names(coef(backward_model))[-1]
-
 # adjusted R2 for each model
 adj_r2_full <- summary(full_model)$adj.r.squared
 adj_r2_forward <- summary(forward_model)$adj.r.squared
 adj_r2_backward <- summary(backward_model)$adj.r.squared
 
-regression_table <- 
-  data.frame(
-    Model = c("Forward Selection", "Backward Selection", "Linear Model"),
-    Predictors = sapply(list(selected_forward, selected_backward, selected_full), paste, collapse = ", "),
-    Adjusted_R2 = c(adj_r2_forward, adj_r2_backward, adj_r2_full)
-  )
-
-regression_table
+cat("Adjusted R2 of full model:", adj_r2_full, "\n")
+cat("Adjusted R2 of forward selected model:", adj_r2_forward, "\n")
+cat("Adjusted R2 of backward selected model:", adj_r2_backward, "\n")
 ```
 
-**Observations:** essentially, adjusted $R^2$ is pretty much the same accross the three models. Plus, both forward/backward end up with the same linear model which is *Monthly_Revenue \~ Number_of_Customers + Menu_Price + Marketing_Spend*.
+**Observations:** Both forward and backward step-wise selection end-up with the same linear model which is *Monthly_Revenue \~ Number_of_Customers + Menu_Price + Marketing_Spend*.
+Essentially, adjusted $R^2$ is pretty much the same accross the three models. In the 3 cases, the variability of the data is explained at 67% by the regression model. This means that the less complex model (with less variables) has an adjustement quality similar to the full model. However, the generalisation of these performances need to be tested by RMSE (on the test set). 
 
-## Ridge regression
+### Model testing 
+```{r}
+y_obs <- test_data$Monthly_Revenue
 
+# full model 
+predict_full <- predict(full_model, newdata = test_data)
+
+r2_full <- 1 - (sum((y_obs - predict_full)^2)) / (sum((y_obs - mean(y_obs))^2))
+mse_full <- mean((y_obs - predict_full)^2)
+rmse_full <- sqrt(mse_full)
+
+#cat("R2 of full model:", r2_full, "\n")
+cat("MSE of full model:", mse_full, "\n")
+cat("RMSE of full model:", rmse_full, "\n")
+```
+
+```{r}
+# forward selected model 
+predict_forward <- predict(forward_model, newdata = test_data)
+
+r2_forward <- 1 - (sum((y_obs - predict_forward)^2)) / (sum((y_obs - mean(y_obs))^2))
+mse_forward <- mean((y_obs - predict_forward)^2)
+rmse_forward <- sqrt(mse_forward)
+
+#cat("R2 of forward model:", r2_forward, "\n")
+cat("MSE of forward model:", mse_forward, "\n")
+cat("RMSE of forward model:", rmse_forward, "\n")
+```
+
+```{r}
+# backward selected model
+predict_backward <- predict(backward_model, newdata = test_data)
+
+r2_backward <- 1 - (sum((y_obs - predict_backward)^2)) / (sum((y_obs - mean(y_obs))^2))
+mse_backward <- mean((y_obs - predict_backward)^2)
+rmse_backward <- sqrt(mse_backward)
+
+#cat("R2 of backward model:", r2_backward, "\n")
+cat("MSE of backward model:", mse_backward, "\n")
+cat("RMSE of backward model:", rmse_backward, "\n")
+```
+
+## Shrinkage/Regularization 
+
+### Ridge regression
+*shrinkage method*
 The goal is to examine how Ridge and Lasso regression techniques apply regularization and how the model coefficients behave across varying levels of penalty strength.
 
 ```{r}
 # prep 
-set.seed(123)
 ## matrix 
-X <- as.matrix(train_data[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", "Average_Customer_Spending", "Reviews")])
-y <- train_data$Monthly_Revenue
+X_train <- as.matrix(train_data[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", "Average_Customer_Spending", "Reviews", "Is_Italian", "Is_Japanese", "Is_Mexican")])
+y_train <- train_data$Monthly_Revenue
 ```
 
 ```{r}
@@ -130,28 +178,35 @@ ridge_df$log_lambda <- log10(ridge_fit$lambda)
 ridge_df <- pivot_longer(ridge_df, -log_lambda, names_to = "Predictor", values_to = "Coefficient")
 
 ## plot
-ggplot(ridge_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
-  geom_line(linewidth = 1) +
-  labs(title = "Ridge Coefficient Paths", x = "log10(λ)", y = "Coefficient") +
-  theme_bw() 
+ridge_coeffs_plot <- 
+  ggplot(ridge_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
+    geom_line(linewidth = 1) +
+    labs(title = "A. Ridge Coefficient Paths", x = expression(log(lambda)), y = "Coefficient") +
+    theme_bw() +
+  theme(legend.position = "bottom")
 ```
 
 ```{r}
 # CV to choose the best lambda
-cv_ridge = cv.glmnet(X, y, alpha = 0, standardize = TRUE)
+cv_ridge = cv.glmnet(X_train, y_train, alpha = 0, standardize = TRUE)
 cat("λ with the smallest MSE:", cv_ridge$lambda.min, "\n")
 ```
 
 ```{r}
+pdf("/Users/amani/Documents/fac/M2/adv_machine_learning/project/outputs/ridge_cv_plot.pdf", 
+    width = 7, height = 6)
+
 # plot MSE over lambda
-plot(cv_ridge) 
+plot(cv_ridge)
+title(main = "A. Ridge Regression Cross-Validation", 
+      adj = 0, line = 3, font.main = 1)
 
 log_lambda_vals <- log(cv_ridge$lambda)
 mean_error_vals <- cv_ridge$cvm
 points(log_lambda_vals, mean_error_vals, pch = 19, col = "#6bafd6", cex = 0.8)
 
-abline(v = log(cv_ridge$lambda.min), lty = 2, col = "red")
-abline(v = log(cv_ridge$lambda.1se), lty = 2, col = "blue")
+abline(v = log(cv_ridge$lambda.min), lty = 2, col = "#D95F02")
+abline(v = log(cv_ridge$lambda.1se), lty = 2, col = "#1B9E77")
 
 legend(
   "bottomright",
@@ -159,40 +214,48 @@ legend(
     expression(lambda["min"] * ": Minimum MSE"), 
     expression(lambda["1se"] * ": 1-Standard Error Rule")
   ),
-  col = c("red", "blue"),
+  col = c("#D95F02", "#1B9E77"),
   lty = c(2, 2),
   lwd = 1,
   cex = 0.8,
   bty = "n"
   )
+
+dev.off()
 ```
 
 ```{r}
 # test matrices 
-X1 <- as.matrix(test_data[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", 
-                              "Average_Customer_Spending", "Reviews")])
+X1 <- as.matrix(test_data[, c("Number_of_Customers", "Menu_Price", "Marketing_Spend", "Average_Customer_Spending", "Reviews", "Is_Italian", "Is_Japanese", "Is_Mexican")])
 y1 <- test_data$Monthly_Revenue
 ```
 
 ```{r}
 # predict 
 y_predicted <- predict(cv_ridge, s = "lambda.min", newx = X1)
+y_test <- test_data$Monthly_Revenue
+mean_y_train <- mean(train_data$Monthly_Revenue)
 
 # computing R2
-r2 <- 1 - (sum((y1 - y_predicted)^2)) / (sum((y1 - mean(y1))^2))
-mse <- mean((y1 - y_predicted)^2)
-rmse <- sqrt(mse)
+SCEP <- sum((y_test - y_predicted)^2)
+SCT_Test <- sum((y_test - mean_y_train)^2)
+r2_test_ridge <- 1 - (SCEP / SCT_Test)
 
-cat("R2 of ridge regression model:", r2, "\n")
-cat("MSE of ridge regression model:", mse, "\n")
-cat("RMSE of ridge regression model:", rmse, "\n")
+# computing MSE/RMSE
+mse_ridge <- mean((y1 - y_predicted)^2)
+rmse_ridge <- sqrt(mse_ridge)
+
+cat("R2 of prediction of ridge regression model:", r2_test_ridge, "\n")
+cat("MSE of ridge regression model:", mse_ridge, "\n")
+cat("RMSE of ridge regression model:", rmse_ridge, "\n")
 ```
 
-## Lasso regression
+### Lasso regression
+*shrinkage method*
 
 ```{r}
 # fit lasso regression model 
-lasso_fit <- glmnet(X, y, alpha = 1, standardize = TRUE)
+lasso_fit <- glmnet(X_train, y_train, alpha = 1, standardize = TRUE)
 ```
 
 ```{r}
@@ -203,28 +266,49 @@ lasso_df$log_lambda <- log10(lasso_fit$lambda)
 lasso_df <- pivot_longer(lasso_df, -log_lambda, names_to = "Predictor", values_to = "Coefficient")
 
 # plot
-ggplot(lasso_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
-  geom_line(linewidth = 1) +
-  labs(title = "Lasso Coefficient Paths", x = "log10(λ)", y = "Coefficient") +
-  theme_bw()
+lasso_coef_plot <- 
+  ggplot(lasso_df, aes(x = log_lambda, y = Coefficient, color = Predictor)) +
+    geom_line(linewidth = 1) +
+    labs(title = "B. Lasso Coefficient Paths", x = expression(log(lambda)), y = "Coefficient") +
+    theme_bw() + 
+  theme(legend.position = "bottom")
+```
+
+```{r}
+coeffs_plot <- ggarrange(
+  ridge_coeffs_plot,
+  lasso_coef_plot,
+  ncol = 2, nrow = 1,
+  common.legend = TRUE,       
+  legend = "bottom")
+
+ggsave(
+  "/Users/amani/Documents/fac/M2/adv_machine_learning/project/outputs/coeffs_plot.pdf",
+  plot = combined_plot,
+  width = 10, height = 5, units = "in")
 ```
 
 ```{r}
 # CV to choose the best lambda
-cv_lasso = cv.glmnet(X, y, alpha = 1, standardize = TRUE) #best model as output
+cv_lasso = cv.glmnet(X_train, y_train, alpha = 1, standardize = TRUE) #best model as output
 cat("λ with the smallest MSE:", cv_lasso$lambda.min, "\n")
 ```
 
 ```{r}
+pdf("/Users/amani/Documents/fac/M2/adv_machine_learning/project/outputs/lasso_cv_plot.pdf", 
+    width = 7, height = 6)
+
 # plot MSE over lambda
 plot(cv_lasso) 
+title(main = "B. Lasso Regression Cross-Validation", 
+      adj = 0, line = 3, font.main = 1)
 
 log_lambda_vals <- log(cv_lasso$lambda)
 mean_error_vals <- cv_lasso$cvm
 points(log_lambda_vals, mean_error_vals, pch = 19, col = "#6bafd6", cex = 0.8)
 
-abline(v = log(cv_lasso$lambda.min), lty = 2, col = "red")
-abline(v = log(cv_lasso$lambda.1se), lty = 2, col = "blue")
+abline(v = log(cv_lasso$lambda.min), lty = 2, col = "#D95F02")
+abline(v = log(cv_lasso$lambda.1se), lty = 2, col = "#1B9E77")
 
 legend(
   "topleft",
@@ -232,64 +316,159 @@ legend(
     expression(lambda["min"] * ": Minimum MSE"), 
     expression(lambda["1se"] * ": 1-Standard Error Rule")
   ),
-  col = c("red", "blue"),
+  col = c("#D95F02", "#1B9E77"),
   lty = c(2, 2),
   lwd = 1,
   cex = 0.8,
   bty = "n"
   )
+
+dev.off()
 ```
 
-```{r}
-# MSE over lambda - ADD LEGEND & SECOND X AXIS 
-n_nonzero <- apply(coef(cv_lasso$glmnet.fit)[-1, ], 2, function(x) sum(x != 0))
-
-cv_df <- data_frame(
-  lambda = cv_lasso$lambda,
-  mean = cv_lasso$cvm,
-  se = cv_lasso$cvsd,
-  log_lambda = log(cv_lasso$lambda),
-  n_nonzero = n_nonzero)
-
-ggplot(cv_df, aes(x = log_lambda, y = mean)) +
-  geom_point(size = 2, color = "#6bafd6") +
-  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.05, color = "grey50") +
-  geom_vline(xintercept = log(cv_lasso$lambda.min), linetype = "dashed", color = "red") +
-  geom_vline(xintercept = log(cv_lasso$lambda.1se), linetype = "dashed", color = "blue") +
-  labs(
-    title = "Cross-Validation Curve",
-    x = "Log(λ)",
-    y = "Mean Squared Error") + 
-  theme_bw()
-```
 
 ```{r}
 # predict 
 y_predicted <- predict(cv_lasso, s = "lambda.min", newx = X1)
+y_test <- test_data$Monthly_Revenue
+mean_y_train <- mean(train_data$Monthly_Revenue)
 
 # computing R2
-r2 <- 1 - (sum((y1 - y_predicted)^2)) / (sum((y1 - mean(y1))^2))
-mse <- mean((y1 - y_predicted)^2)
-rmse <- sqrt(mse)
+SCEP <- sum((y_test - y_predicted)^2)
+SCT_Test <- sum((y_test - mean_y_train)^2)
+r2_test_lasso <- 1 - (SCEP / SCT_Test)
 
-cat("R2 of lasso regression model:", r2, "\n")
-cat("MSE of lasso regression model:", mse, "\n")
-cat("RMSE of lasso regression model:", rmse, "\n")
+# computing MSE/RMSE
+mse_lasso <- mean((y1 - y_predicted)^2)
+rmse_lasso <- sqrt(mse_lasso)
+
+cat("R2 of prediction of lasso regression model:", r2_test_lasso, "\n")
+cat("MSE of lasso regression model:", mse_lasso, "\n")
+cat("RMSE of lasso regression model:", rmse_lasso, "\n")
 ```
 
-## Principal Components Regression & Partial Least Squares Regression
+## Comparison
+```{r}
+comparison_df <- data.frame(
+  Method = c("Full model", "Forward selection", "Backward selection", 
+             "Ridge regression", "Lasso regression"),
+  Test_MSE = c(mse_full, mse_forward, mse_backward, 
+               mse_ridge, mse_lasso), 
+  Test_RMSE = c(rmse_full, rmse_forward, rmse_backward, 
+                rmse_ridge, rmse_lasso), 
+  Test_R2 = c(r2_full, r2_forward, r2_backward, 
+              r2_test_ridge, r2_test_lasso)
 
-Repenser cette section
+)
+comparison_df
+```
+```{r}
+# ADD RIDGE
+X <- restaurant_revenue[, -which(names(restaurant_revenue) == "Monthly_Revenue")]
+y <- restaurant_revenue$Monthly_Revenue
+X_scaled <- scale(X)
+
+lasso_counts <- setNames(rep(0, ncol(X)), colnames(X))
+forward_counts <- lasso_counts
+backward_counts <- lasso_counts
+
+
+for (i in 1:100) {
+  # Separate observations into train and test sets
+  idx <- sample(1:nrow(X), size = 0.7 * nrow(X))
+  X_train <- X_scaled[idx, ]
+  y_train <- y[idx]
+  X_test <- X_scaled[-idx, ]
+  y_test <- y[-idx]
+
+  # Define lasso regression (by alpha = 1)
+  cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1)
+
+  lasso_coef <- coef(cv_lasso, s = cv_lasso$lambda.min)[-1]
+  selected_lasso <- abs(as.vector(lasso_coef)) > 1e-6
+  lasso_counts[selected_lasso] <- lasso_counts[selected_lasso] + 1
+
+  train_df <- as.data.frame(X_train)
+  train_df$y <- y_train
+
+  # Define full and empty models
+  full_model <- lm(y ~ ., data = train_df)
+  empty_model <- lm(y ~ 1, data = train_df)
+
+  # Backward stepwise selection using step() function
+  model_bwd <- step(full_model,
+                    scope = list(lower = empty_model, upper = full_model),
+                    direction = "backward",
+                    k = log(nrow(train_df)),
+                    trace = 0)
+  coef_bwd <- names(coef(model_bwd))[-1]
+  backward_counts[coef_bwd] <- backward_counts[coef_bwd] + 1
+
+  # Forward stepwise selection using step() function
+  model_fwd <- step(empty_model,
+                    scope = list(lower = empty_model, upper = full_model),
+                    direction = "forward",
+                    k = log(nrow(train_df)),
+                    trace = 0)
+  coef_fwd <- names(coef(model_fwd))[-1]
+  forward_counts[coef_fwd] <- forward_counts[coef_fwd] + 1
+}
+```
+
+```{r}
+# Store results as data.frame object 
+selection_df <- data.frame(
+  Lasso = lasso_counts,
+  Backward = backward_counts,
+  Forward = forward_counts,
+  row.names = names(lasso_counts)
+)
+
+# Move row names to a column
+selection_df <- tibble::rownames_to_column(selection_df, var = "Variable")
+
+selection_df
+```
+```{r}
+# Plot results as ba rplot 
+selection_long <- pivot_longer(selection_df, -Variable, names_to = "Method", values_to = "Count")
+
+comparison_plot <- 
+  ggplot(selection_long, aes(x = Variable, y = Count, fill = Method)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    scale_fill_manual(values = c("#6bafd6", "#D95F02", "#1B9E77")) +
+    labs(title = "Selection Frequency (out of 100) for Each Variable", y = "Selection Count") +
+    theme_bw() +
+    theme(
+      plot.title = element_text(size = 14),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      panel.grid.major = element_line(color = "grey85", size = 0.3),
+      panel.grid.minor = element_blank()
+    )
+
+
+ggsave(
+  "/Users/amani/Documents/fac/M2/adv_machine_learning/project/outputs/comparison_plot.pdf",
+  plot = comparison_plot,
+  width = 14, height = 7, units = "in")
+```
+
+## Dimension reduction
+*Principal Components Regression & Partial Least Squares Regression*
+### Model construction 
 
 ```{r}
 library(pls)
-pcr_model <- pcr(y ~ X, validation = "CV", ncomp = 5, scale = TRUE, segments = 10)
+pcr_model <- pcr(y_train ~ X_train, validation = "CV", ncomp = 5, scale = TRUE, segments = 10)
 mse_pcr <- MSEP(pcr_model)$val[1, 1, -1]
 ```
 
 ```{r}
 # plsr() function is analogous to the pcr() function. It returns object of class "plsr". 
-pls_model <- plsr(y ~ X, validation = "CV", ncomp = 5, scale = TRUE, segments = 10)
+pls_model <- plsr(y_train ~ X_train, validation = "CV", ncomp = 5, scale = TRUE, segments = 10)
 
 # Extract cross-validated MSEs from the PLS model for components 1 to 6 
 mse_pls <- MSEP(pls_model)$val[1, 1, -1]
@@ -303,21 +482,41 @@ results_df <- tibble(
 ) %>%
   pivot_longer(-Components, names_to = "Method", values_to = "MSE")
 
-ggplot(results_df, aes(x = Components, y = MSE, color = Method)) +
-  geom_line(size = 1) +
-  geom_point(size = 2) +
-  labs(title = "CV MSE VS Number of Components", x = "Number of Components", y = "10-fold CV MSE") +
-  theme_bw()
-```
+pcr_pls_plot <- 
+  ggplot(results_df, aes(x = Components, y = MSE, color = Method)) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    scale_color_manual(values = c("PCR" = "#D95F02", "PLS" = "#1B9E77")) +
+    labs(title = "CV MSE VS Number of Components", x = "Number of Components", y = "10-fold CV MSE") +
+    theme_bw()
 
+ggsave(
+  "/Users/amani/Documents/fac/M2/adv_machine_learning/project/outputs/pcr_pls_plot.pdf",
+  plot = pcr_pls_plot,
+  width = 9, height = 5, units = "in")
+```
+### Model testing
 ```{r}
 opt_pcr <- which.min(mse_pcr)
 opt_pls <- which.min(mse_pls)
 
+
+SCT_Test <- sum((y_test - mean_y_train)^2)
+scep_pcr_opt <- summary_df$Test_MSE[summary_df$Method == "PCR"] * length(y_test)
+scep_pls_opt <- summary_df$Test_MSE[summary_df$Method == "PLS"] * length(y_test)
+R2_test_pcr <- 1 - (scep_pcr_opt / SCT_Test)
+R2_test_pls <- 1 - (scep_pls_opt / SCT_Test)
+
+
 summary_df <- data.frame(
   Method = c("PCR", "PLS"),
   Optimal_Components = c(opt_pcr, opt_pls),
-  Test_MSE = c(mse_pcr[opt_pcr], mse_pls[opt_pls])
+  Test_MSE = c(mse_pcr[opt_pcr], mse_pls[opt_pls]), 
+  Test_RMSE = c(sqrt(mse_pcr)[opt_pcr], sqrt(mse_pls)[opt_pls]), 
+  Test_R2 = c(R2_test_pcr, R2_test_pls)
+
 )
 summary_df
 ```
+
+
